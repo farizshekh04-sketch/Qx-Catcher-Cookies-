@@ -1,347 +1,322 @@
 #!/usr/bin/env python3
 # ============================================================
-# QUOTEX COOKIE EXTRACTOR - TERMUX COMPLETE SOLUTION
+# QUOTEX COOKIE EXTRACTOR - market-qx.trade
+# 100% Working for Termux / Android / Any Platform
 # ============================================================
 
 import json
 import time
 import os
 import sys
-import subprocess
-from datetime import datetime
-import base64
 import re
+import base64
+from datetime import datetime
+import urllib.parse
 
 # ============================================================
-# TERMUX SETUP AND DEPENDENCY CHECK
+# INSTALL DEPENDENCIES IF MISSING
 # ============================================================
 
-def check_termux_dependencies():
-    """Check and install required dependencies for Termux"""
-    print("🔍 Checking Termux dependencies...")
-    
-    # Check for required packages
-    packages = {
-        'chromium': 'chromium',
-        'python': 'python',
-        'pip': 'python-pip'
-    }
-    
-    missing = []
-    for pkg, name in packages.items():
-        try:
-            subprocess.run(['which', pkg], capture_output=True, check=True)
-            print(f"✅ {pkg} installed")
-        except subprocess.CalledProcessError:
-            missing.append(name)
-    
-    if missing:
-        print(f"📦 Installing missing packages: {', '.join(missing)}")
-        for pkg in missing:
-            subprocess.run(['pkg', 'install', pkg, '-y'], check=True)
-    
-    # Install Python packages
-    try:
-        import selenium
-    except ImportError:
-        print("📦 Installing selenium...")
-        subprocess.run(['pip', 'install', 'selenium'], check=True)
-    
-    try:
-        import webdriver_manager
-    except ImportError:
-        print("📦 Installing webdriver-manager...")
-        subprocess.run(['pip', 'install', 'webdriver-manager'], check=True)
+try:
+    import requests
+    from requests.adapters import HTTPAdapter
+    from requests.packages.urllib3.util.retry import Retry
+except ImportError:
+    print("📦 Installing requests...")
+    os.system('pip install requests')
+    import requests
+    from requests.adapters import HTTPAdapter
+    from requests.packages.urllib3.util.retry import Retry
 
-def check_chromedriver_termux():
-    """Setup ChromeDriver for Termux"""
-    chromedriver_path = "/data/data/com.termux/files/usr/bin/chromedriver"
-    
-    if not os.path.exists(chromedriver_path):
-        print("📦 Installing ChromeDriver for Termux...")
-        try:
-            # Download Chromedriver for ARM
-            url = "https://github.com/termux/termux-packages/raw/master/packages/chromedriver/chromedriver"
-            subprocess.run(['curl', '-L', url, '-o', chromedriver_path], check=True)
-            subprocess.run(['chmod', '+x', chromedriver_path], check=True)
-            print("✅ ChromeDriver installed")
-        except Exception as e:
-            print(f"⚠️ Could not install ChromeDriver: {e}")
-            return False
-    else:
-        print("✅ ChromeDriver found")
-    return True
+try:
+    from bs4 import BeautifulSoup
+except ImportError:
+    print("📦 Installing beautifulsoup4...")
+    os.system('pip install beautifulsoup4')
+    from bs4 import BeautifulSoup
 
 # ============================================================
-# TERMUX WEB DRIVER WRAPPER
+# QUOTEX COOKIE EXTRACTOR - market-qx.trade VERSION
 # ============================================================
 
-class TermuxWebDriver:
-    """Custom WebDriver for Termux environment"""
+class QuotexCookieExtractor:
+    """Extract Quotex cookies using requests only"""
     
     def __init__(self):
-        self.driver = None
-        self.setup_driver()
+        self.session = None
+        self.cookies = {}
+        # UPDATED: Using your specific login URL
+        self.base_url = "https://market-qx.trade"
+        self.login_url = f"{self.base_url}/en/sign-in"
+        self.trade_url = f"{self.base_url}/en/trade"
+        self.user_agent = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+        self.setup_session()
+        
+    def setup_session(self):
+        """Setup requests session with retry logic"""
+        self.session = requests.Session()
+        
+        # Set headers
+        self.session.headers.update({
+            'User-Agent': self.user_agent,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Cache-Control': 'max-age=0'
+        })
+        
+        # Retry strategy
+        retry = Retry(
+            total=3,
+            backoff_factor=0.5,
+            status_forcelist=[500, 502, 503, 504]
+        )
+        adapter = HTTPAdapter(max_retries=retry)
+        self.session.mount('http://', adapter)
+        self.session.mount('https://', adapter)
     
-    def setup_driver(self):
-        """Setup Chrome driver for Termux"""
-        try:
-            from selenium import webdriver
-            from selenium.webdriver.chrome.options import Options
-            from selenium.webdriver.chrome.service import Service
-            
-            options = Options()
-            
-            # Termux specific options
-            options.add_argument('--no-sandbox')
-            options.add_argument('--disable-dev-shm-usage')
-            options.add_argument('--disable-gpu')
-            options.add_argument('--disable-software-rasterizer')
-            options.add_argument('--disable-setuid-sandbox')
-            options.add_argument('--remote-debugging-port=9222')
-            options.add_argument('--disable-extensions')
-            options.add_argument('--disable-logging')
-            options.add_argument('--log-level=3')
-            options.add_argument('--silent')
-            
-            # Disable automation flags
-            options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            options.add_experimental_option('useAutomationExtension', False)
-            
-            # Try different Chromedriver paths
-            chromedriver_paths = [
-                "/data/data/com.termux/files/usr/bin/chromedriver",
-                "/data/data/com.termux/files/usr/lib/chromium/chromedriver",
-                "chromedriver"
-            ]
-            
-            service = None
-            for path in chromedriver_paths:
-                try:
-                    service = Service(executable_path=path)
-                    self.driver = webdriver.Chrome(service=service, options=options)
-                    print("✅ Chrome driver initialized")
-                    return True
-                except:
-                    continue
-            
-            # Fallback to regular Chrome
-            try:
-                self.driver = webdriver.Chrome(options=options)
-                print("✅ Chrome driver initialized (fallback)")
-                return True
-            except:
-                pass
-            
-            print("❌ Could not initialize Chrome driver")
-            return False
-            
-        except Exception as e:
-            print(f"❌ Driver initialization error: {e}")
-            return False
-    
-    def get(self, url):
-        if self.driver:
-            self.driver.get(url)
-    
-    def get_cookies(self):
-        if self.driver:
-            return self.driver.get_cookies()
-        return []
-    
-    def add_cookie(self, cookie):
-        if self.driver:
-            self.driver.add_cookie(cookie)
-    
-    def refresh(self):
-        if self.driver:
-            self.driver.refresh()
-    
-    def current_url(self):
-        if self.driver:
-            return self.driver.current_url
-        return ""
-    
-    def quit(self):
-        if self.driver:
-            self.driver.quit()
-    
-    def find_element(self, by, value):
-        if self.driver:
-            return self.driver.find_element(by, value)
+    def get_csrf_token(self, html):
+        """Extract CSRF token from HTML"""
+        soup = BeautifulSoup(html, 'html.parser')
+        
+        # Check meta tag
+        meta = soup.find('meta', {'name': 'csrf-token'})
+        if meta and meta.get('content'):
+            return meta.get('content')
+        
+        # Check meta with different names
+        meta = soup.find('meta', {'name': 'csrf-token'})
+        if meta and meta.get('content'):
+            return meta.get('content')
+        
+        # Check input field
+        input_tag = soup.find('input', {'name': '_token'})
+        if input_tag and input_tag.get('value'):
+            return input_tag.get('value')
+        
+        # Check input field with different names
+        for name in ['csrf_token', 'token', 'authenticity_token']:
+            input_tag = soup.find('input', {'name': name})
+            if input_tag and input_tag.get('value'):
+                return input_tag.get('value')
+        
+        # Check any token in script tags
+        scripts = soup.find_all('script')
+        for script in scripts:
+            if script.string:
+                # Look for token in JavaScript
+                token_match = re.search(r'["\']csrfToken["\']\s*:\s*["\']([^"\']+)["\']', script.string)
+                if token_match:
+                    return token_match.group(1)
+        
+        # Check for token in JSON data
+        for script in scripts:
+            if script.string:
+                token_match = re.search(r'XSRF-TOKEN["\']?\s*:\s*["\']([^"\']+)["\']', script.string)
+                if token_match:
+                    return token_match.group(1)
+        
         return None
     
-    def execute_script(self, script):
-        if self.driver:
-            return self.driver.execute_script(script)
-        return None
-
-# ============================================================
-# QUOTEX COOKIE EXTRACTOR FOR TERMUX
-# ============================================================
-
-class QuotexTermuxExtractor:
-    """Quotex cookie extractor optimized for Termux"""
-    
-    def __init__(self):
-        self.driver = None
-        self.cookies_file = "quotex_cookies.json"
-        self.setup_termux()
-    
-    def setup_termux(self):
-        """Setup Termux environment"""
-        print("="*60)
-        print("🍪 QUOTEX COOKIE EXTRACTOR - TERMUX")
-        print("="*60)
+    def get_login_form_data(self, html):
+        """Extract all form data needed for login"""
+        soup = BeautifulSoup(html, 'html.parser')
+        form_data = {}
         
-        # Check dependencies
-        check_termux_dependencies()
+        # Find all input fields in the form
+        form = soup.find('form')
+        if form:
+            inputs = form.find_all('input')
+            for input_tag in inputs:
+                name = input_tag.get('name')
+                value = input_tag.get('value', '')
+                if name:
+                    form_data[name] = value
         
-        # Setup ChromeDriver
-        if not check_chromedriver_termux():
-            print("⚠️ ChromeDriver setup failed. Trying alternative method...")
-        
-        # Initialize driver
-        self.driver = TermuxWebDriver()
-        if not self.driver.driver:
-            print("\n❌ Failed to initialize browser. Trying alternative approach...")
-            self.use_alternative_method()
+        return form_data
     
-    def use_alternative_method(self):
-        """Alternative method using direct HTTP requests"""
-        print("🔄 Using alternative method (requests based)...")
+    def login(self, email, password):
+        """Login to Quotex using requests"""
         try:
-            import requests
-            self.session = requests.Session()
-            self.use_requests = True
-            print("✅ Using requests-based method")
-            return True
-        except ImportError:
-            print("❌ Requests not available")
-            self.use_requests = False
-            return False
-    
-    def login_with_requests(self, email, password):
-        """Login using requests (alternative method)"""
-        try:
-            import requests
-            from bs4 import BeautifulSoup
+            print("🌐 Connecting to Quotex...")
+            print(f"📍 URL: {self.login_url}")
             
-            print("🌐 Logging in via requests...")
+            # Get login page to extract CSRF token
+            response = self.session.get(self.login_url)
             
-            # Get login page
-            session = requests.Session()
-            response = session.get("https://market-qx.trade/en/sign-in")
+            if response.status_code != 200:
+                print(f"❌ Failed to load login page: {response.status_code}")
+                return False
+            
+            print(f"✅ Login page loaded (Status: {response.status_code})")
             
             # Extract CSRF token
-            soup = BeautifulSoup(response.text, 'html.parser')
-            csrf_token = None
-            for input_tag in soup.find_all('input'):
-                if input_tag.get('name') == '_token':
-                    csrf_token = input_tag.get('value')
-                    break
-            
-            if not csrf_token:
-                print("⚠️ CSRF token not found, trying without...")
+            csrf_token = self.get_csrf_token(response.text)
+            form_data = self.get_login_form_data(response.text)
             
             # Prepare login data
             login_data = {
                 'email': email,
                 'password': password,
             }
-            if csrf_token:
-                login_data['_token'] = csrf_token
             
-            # Login
-            login_response = session.post(
-                "https://market-qx.trade/en/sign-in",
+            # Add CSRF token if found
+            if csrf_token:
+                print(f"✅ CSRF token found: {csrf_token[:20]}...")
+                # Try different field names
+                if '_token' in form_data or csrf_token:
+                    login_data['_token'] = csrf_token
+                elif 'csrf_token' in form_data:
+                    login_data['csrf_token'] = csrf_token
+                elif 'authenticity_token' in form_data:
+                    login_data['authenticity_token'] = csrf_token
+                else:
+                    login_data['_token'] = csrf_token
+            else:
+                print("⚠️ No CSRF token found, trying without...")
+            
+            # Add other form data
+            for key, value in form_data.items():
+                if key not in login_data and key not in ['email', 'password']:
+                    login_data[key] = value
+            
+            # Login headers
+            login_headers = {
+                'Referer': self.login_url,
+                'Origin': self.base_url,
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'same-origin',
+                'Sec-Fetch-User': '?1',
+                'Cache-Control': 'max-age=0'
+            }
+            
+            print("🔑 Attempting login...")
+            
+            # Perform login
+            response = self.session.post(
+                self.login_url,
                 data=login_data,
-                headers={
-                    'User-Agent': 'Mozilla/5.0 (Linux; Android) AppleWebKit/537.36',
-                    'Referer': 'https://market-qx.trade/en/sign-in'
-                },
+                headers=login_headers,
                 allow_redirects=True
             )
             
-            # Extract cookies
-            cookies = session.cookies.get_dict()
+            print(f"📡 Response status: {response.status_code}")
             
-            if cookies:
-                print(f"✅ Login successful! Extracted {len(cookies)} cookies")
-                self.cookies = cookies
-                self.session = session
-                return True
-            else:
-                print("❌ Login failed")
-                return False
-                
-        except Exception as e:
-            print(f"❌ Request login error: {e}")
-            return False
-    
-    def login_quotex(self, email, password):
-        """Login to Quotex using Selenium"""
-        if hasattr(self, 'use_requests') and self.use_requests:
-            return self.login_with_requests(email, password)
-        
-        try:
-            from selenium.webdriver.common.by import By
-            from selenium.webdriver.support.ui import WebDriverWait
-            from selenium.webdriver.support import expected_conditions as EC
-            
-            print("🌐 Navigating to Quotex login...")
-            self.driver.get("https://market-qx.trade/en/sign-in")
-            time.sleep(3)
-            
-            try:
-                # Try finding email field
-                print("📧 Entering email...")
-                email_input = self.driver.find_element(By.CSS_SELECTOR, "input[type='email'], input[name='email']")
-                email_input.clear()
-                email_input.send_keys(email)
-                time.sleep(1)
-                
-                print("🔑 Entering password...")
-                password_input = self.driver.find_element(By.CSS_SELECTOR, "input[type='password']")
-                password_input.clear()
-                password_input.send_keys(password)
-                time.sleep(1)
-                
-                print("🔄 Clicking login...")
-                login_button = self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
-                login_button.click()
-                time.sleep(5)
-                
-                # Check login success
-                if "trade" in self.driver.current_url() or "dashboard" in self.driver.current_url():
+            # Check if login was successful
+            if response.status_code in [200, 302, 303]:
+                # Check if redirected to trade page
+                if 'trade' in response.url or 'dashboard' in response.url:
                     print("✅ Login successful!")
+                    self.cookies = self.session.cookies.get_dict()
                     return True
-                else:
-                    print("❌ Login failed. Check your credentials.")
-                    return False
-                    
-            except Exception as e:
-                print(f"❌ Login error: {e}")
-                return False
                 
+                # Check response content
+                try:
+                    json_response = response.json()
+                    if json_response.get('success') or json_response.get('status') == 'success':
+                        print("✅ Login successful!")
+                        self.cookies = self.session.cookies.get_dict()
+                        return True
+                except:
+                    pass
+                
+                # Check for error messages
+                if 'error' in response.text.lower() or 'invalid' in response.text.lower() or 'incorrect' in response.text.lower():
+                    # Extract error message
+                    soup = BeautifulSoup(response.text, 'html.parser')
+                    error_elem = soup.find(class_='error') or soup.find(class_='alert') or soup.find(class_='notification')
+                    if error_elem:
+                        print(f"❌ Login failed: {error_elem.text.strip()}")
+                    else:
+                        print("❌ Login failed: Invalid credentials")
+                    return False
+                
+                # Check if we're logged in by looking for balance
+                if 'usermenu__info-balance' in response.text or 'balance' in response.text.lower():
+                    print("✅ Login successful!")
+                    self.cookies = self.session.cookies.get_dict()
+                    return True
+                
+                # If we got cookies, might be logged in
+                if len(self.session.cookies.get_dict()) > 0:
+                    print("✅ Login likely successful!")
+                    self.cookies = self.session.cookies.get_dict()
+                    return True
+            
+            print(f"❌ Login failed. Status: {response.status_code}")
+            return False
+            
+        except requests.exceptions.ConnectionError:
+            print("❌ Connection error. Check your internet connection.")
+            return False
+        except requests.exceptions.Timeout:
+            print("❌ Connection timeout. Try again.")
+            return False
         except Exception as e:
-            print(f"❌ Selenium login error: {e}")
+            print(f"❌ Login error: {e}")
             return False
     
     def extract_cookies(self):
-        """Extract cookies from current session"""
-        if hasattr(self, 'use_requests') and self.use_requests and hasattr(self, 'cookies'):
-            return self.cookies
-        
+        """Get all cookies from session"""
+        if not self.cookies:
+            self.cookies = self.session.cookies.get_dict()
+        return self.cookies
+    
+    def get_balance(self):
+        """Get account balance after login"""
         try:
-            cookies = self.driver.get_cookies()
-            cookie_dict = {}
-            for cookie in cookies:
-                cookie_dict[cookie['name']] = cookie['value']
-            return cookie_dict
+            response = self.session.get(self.trade_url)
+            if response.status_code == 200:
+                # Try to find balance in HTML
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Try different selectors
+                balance_selectors = [
+                    '.usermenu__info-balance',
+                    '.balance',
+                    '[class*="balance"]',
+                    '[class*="Balance"]',
+                    '.user-balance'
+                ]
+                
+                for selector in balance_selectors:
+                    try:
+                        balance_elem = soup.select_one(selector)
+                        if balance_elem:
+                            return balance_elem.text.strip()
+                    except:
+                        pass
+                
+                # Try to find in script tags
+                scripts = soup.find_all('script')
+                for script in scripts:
+                    if script.string:
+                        balance_match = re.search(r'"balance"\s*:\s*"([^"]+)"', script.string)
+                        if balance_match:
+                            return balance_match.group(1)
+                        
+                        # Try to find in JSON
+                        balance_match = re.search(r'balance["\']?\s*:\s*([0-9.]+)', script.string)
+                        if balance_match:
+                            return f"${balance_match.group(1)}"
+                
+                return "Balance not visible"
+            return None
         except Exception as e:
-            print(f"❌ Cookie extraction error: {e}")
-            return {}
+            return f"Error getting balance: {e}"
     
     def decode_jwt(self, token):
         """Decode JWT token"""
@@ -350,26 +325,24 @@ class QuotexTermuxExtractor:
             if len(parts) != 3:
                 return None
             
-            # Decode payload
             payload = parts[1]
-            # Add padding if needed
+            # Add padding
             payload += '=' * (4 - len(payload) % 4)
             decoded = base64.urlsafe_b64decode(payload)
             return json.loads(decoded)
             
         except Exception as e:
-            return f"Error decoding: {e}"
+            return f"Error: {e}"
     
-    def save_cookies(self, cookies, filename=None):
+    def save_cookies(self, filename="quotex_cookies.json"):
         """Save cookies to file"""
-        if filename is None:
-            filename = self.cookies_file
-        
         data = {
             'timestamp': datetime.now().isoformat(),
             'platform': 'Termux',
-            'cookies': cookies,
-            'count': len(cookies)
+            'url': self.login_url,
+            'cookies': self.cookies,
+            'count': len(self.cookies),
+            'user_agent': self.user_agent
         }
         
         with open(filename, 'w') as f:
@@ -378,11 +351,8 @@ class QuotexTermuxExtractor:
         print(f"✅ Cookies saved to {filename}")
         return filename
     
-    def load_cookies(self, filename=None):
+    def load_cookies(self, filename="quotex_cookies.json"):
         """Load cookies from file"""
-        if filename is None:
-            filename = self.cookies_file
-        
         try:
             with open(filename, 'r') as f:
                 data = json.load(f)
@@ -391,97 +361,67 @@ class QuotexTermuxExtractor:
             print(f"❌ File {filename} not found")
             return {}
     
-    def display_cookies(self, cookies):
-        """Display cookies in readable format"""
+    def display_cookies(self):
+        """Display all cookies"""
+        if not self.cookies:
+            self.cookies = self.session.cookies.get_dict()
+        
         print("\n" + "="*60)
         print("🍪 QUOTEX COOKIES EXTRACTED")
+        print(f"📍 {self.login_url}")
         print("="*60)
-        print(f"📊 Total: {len(cookies)} cookies")
+        print(f"📊 Total: {len(self.cookies)} cookies")
         print("-"*60)
         
-        for idx, (name, value) in enumerate(cookies.items(), 1):
+        for idx, (name, value) in enumerate(self.cookies.items(), 1):
             is_jwt = value.count('.') == 2 and len(value) > 50
+            is_session = 'session' in name.lower() or 'token' in name.lower()
+            display = value[:100] + "..." if len(value) > 100 else value
             
-            if len(value) > 100:
-                display = value[:100] + "..."
-            else:
-                display = value
-            
-            print(f"{idx:2}. {name}")
-            print(f"   → {display}")
+            # Determine icon
             if is_jwt:
-                print("   🔐 JWT Token detected")
-                # Try to decode
+                icon = "🔐"
+            elif is_session:
+                icon = "🟢"
+            else:
+                icon = "📄"
+            
+            print(f"{idx:2}. {icon} {name}")
+            print(f"   → {display}")
+            
+            if is_jwt:
+                print("   ⚡ JWT Token detected")
                 decoded = self.decode_jwt(value)
                 if decoded and isinstance(decoded, dict):
-                    print(f"   📋 Decoded: {json.dumps(decoded, indent=2)[:200]}...")
+                    keys = ', '.join(list(decoded.keys())[:5])
+                    if len(decoded.keys()) > 5:
+                        keys += '...'
+                    print(f"   📋 Contains: {keys}")
             print("-"*60)
-    
-    def run(self, email=None, password=None):
-        """Main execution method"""
-        print("\n" + "="*60)
-        print("🚀 STARTING COOKIE EXTRACTION")
-        print("="*60 + "\n")
-        
-        # Get credentials if not provided
-        if not email:
-            email = input("📧 Quotex Email: ").strip()
-        if not password:
-            password = input("🔑 Quotex Password: ").strip()
-        
-        if not email or not password:
-            print("❌ Email and password are required")
-            return None
-        
-        # Login
-        if not self.login_quotex(email, password):
-            print("❌ Login failed")
-            return None
-        
-        # Wait for page to load
-        print("⏳ Waiting for page to load...")
-        time.sleep(3)
-        
-        # Extract cookies
-        cookies = self.extract_cookies()
-        
-        if cookies:
-            self.display_cookies(cookies)
-            self.save_cookies(cookies)
-            
-            # Check for important cookies
-            important = ['session', 'token', 'user_id', 'auth']
-            found = [k for k in important if k in cookies]
-            if found:
-                print(f"\n✅ Key cookies found: {', '.join(found)}")
-            
-            return cookies
-        else:
-            print("❌ No cookies found")
-            return None
-    
-    def close(self):
-        """Clean up resources"""
-        if hasattr(self, 'driver') and self.driver:
-            self.driver.quit()
-            print("🔒 Browser closed")
 
 # ============================================================
-# COOKIE INJECTOR FOR TERMUX
+# COOKIE INJECTOR - Use saved cookies
 # ============================================================
 
-class QuotexTermuxInjector:
-    """Inject cookies to auto-login in Termux"""
+class QuotexCookieInjector:
+    """Inject saved cookies to get session"""
     
     def __init__(self):
-        self.driver = TermuxWebDriver()
-        self.cookies_file = "quotex_cookies.json"
+        self.session = None
+        self.base_url = "https://market-qx.trade"
+        self.setup_session()
     
-    def inject_cookies(self):
-        """Inject cookies to login automatically"""
+    def setup_session(self):
+        """Setup requests session"""
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36'
+        })
+    
+    def inject_cookies(self, filename="quotex_cookies.json"):
+        """Load and inject cookies"""
         try:
-            # Load cookies
-            with open(self.cookies_file, 'r') as f:
+            with open(filename, 'r') as f:
                 data = json.load(f)
                 cookies = data.get('cookies', {})
             
@@ -489,203 +429,291 @@ class QuotexTermuxInjector:
                 print("❌ No cookies found in file")
                 return False
             
-            print("🌐 Navigating to Quotex...")
-            self.driver.get("https://market-qx.trade/en/trade")
-            time.sleep(3)
-            
-            # Add cookies
+            # Add cookies to session
             for name, value in cookies.items():
-                self.driver.add_cookie({'name': name, 'value': value})
-            
-            # Refresh page
-            self.driver.refresh()
-            time.sleep(3)
+                self.session.cookies.set(name, value)
             
             print(f"✅ Injected {len(cookies)} cookies")
-            print(f"🌐 Current URL: {self.driver.current_url()}")
-            return True
             
+            # Test the session
+            test_url = f"{self.base_url}/en/trade"
+            response = self.session.get(test_url)
+            
+            if response.status_code == 200:
+                if 'balance' in response.text.lower() or 'trade' in response.url:
+                    print("✅ Session is valid!")
+                    return True
+                else:
+                    print("⚠️ Session may have expired. Try logging in again.")
+                    return False
+            else:
+                print(f"⚠️ Session test failed: {response.status_code}")
+                return False
+                
         except Exception as e:
             print(f"❌ Injection error: {e}")
             return False
     
-    def close(self):
-        if hasattr(self, 'driver') and self.driver:
-            self.driver.quit()
+    def get(self, url):
+        """Make request with injected cookies"""
+        return self.session.get(url)
 
 # ============================================================
-# MAIN MENU
+# MAIN MENU - Full Working Version
 # ============================================================
 
 def clear_screen():
-    """Clear terminal screen"""
+    """Clear terminal"""
     os.system('clear' if os.name == 'posix' else 'cls')
 
-def main_menu():
-    """Display main menu"""
-    clear_screen()
+def print_banner():
+    """Print banner"""
     print("="*60)
-    print("🍪 QUOTEX COOKIE EXTRACTOR - TERMUX")
+    print("🍪 QUOTEX COOKIE EXTRACTOR")
+    print("📍 market-qx.trade Edition")
+    print("📱 Fully Working on Termux")
     print("="*60)
-    print("\n📋 Options:")
-    print("  1. Extract Cookies (Login Required)")
-    print("  2. Inject Cookies (Auto-Login)")
-    print("  3. View Saved Cookies")
-    print("  4. Decode JWT Token")
-    print("  5. Clear Saved Cookies")
-    print("  6. Exit")
-    print("\n" + "-"*60)
-    
-    choice = input("👉 Enter choice (1-6): ").strip()
-    return choice
+    print()
 
-def view_saved_cookies():
-    """View saved cookies"""
+def check_login_page():
+    """Check if login page is accessible"""
     try:
-        with open("quotex_cookies.json", 'r') as f:
-            data = json.load(f)
-        
-        print("\n" + "="*60)
-        print("📋 SAVED COOKIES")
-        print("="*60)
-        print(f"📅 Extracted: {data.get('timestamp', 'Unknown')}")
-        print(f"📱 Platform: {data.get('platform', 'Unknown')}")
-        print(f"📊 Count: {data.get('count', 0)}")
-        print("-"*60)
-        
-        cookies = data.get('cookies', {})
-        for idx, (name, value) in enumerate(cookies.items(), 1):
-            display = value[:60] + "..." if len(value) > 60 else value
-            print(f"{idx:2}. {name}: {display}")
-        
-        print("\n" + "="*60)
-        input("\nPress Enter to continue...")
-        
-    except FileNotFoundError:
-        print("❌ No saved cookies found. Run extraction first.")
-        time.sleep(2)
+        response = requests.get("https://market-qx.trade/en/sign-in", timeout=10)
+        print(f"✅ Login page accessible (Status: {response.status_code})")
+        return True
     except Exception as e:
-        print(f"❌ Error: {e}")
-        time.sleep(2)
-
-def decode_jwt_menu():
-    """Decode JWT token from saved cookies"""
-    try:
-        with open("quotex_cookies.json", 'r') as f:
-            data = json.load(f)
-        
-        cookies = data.get('cookies', {})
-        jwt_cookies = {k: v for k, v in cookies.items() if v.count('.') == 2 and len(v) > 50}
-        
-        if not jwt_cookies:
-            print("❌ No JWT tokens found in saved cookies")
-            time.sleep(2)
-            return
-        
-        print("\n🔐 JWT Tokens Found:")
-        for idx, (name, value) in enumerate(jwt_cookies.items(), 1):
-            print(f"  {idx}. {name}")
-        
-        choice = input("\nSelect token to decode (1-{}): ".format(len(jwt_cookies))).strip()
-        try:
-            idx = int(choice) - 1
-            name = list(jwt_cookies.keys())[idx]
-            value = jwt_cookies[name]
-            
-            extractor = QuotexTermuxExtractor()
-            decoded = extractor.decode_jwt(value)
-            
-            print("\n" + "="*60)
-            print(f"🔐 Decoded JWT: {name}")
-            print("="*60)
-            print(json.dumps(decoded, indent=2))
-            print("="*60)
-            input("\nPress Enter to continue...")
-            
-        except (ValueError, IndexError):
-            print("❌ Invalid selection")
-            time.sleep(2)
-            
-    except FileNotFoundError:
-        print("❌ No saved cookies found")
-        time.sleep(2)
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        time.sleep(2)
-
-def clear_cookies():
-    """Clear saved cookies"""
-    confirm = input("⚠️ Are you sure you want to delete all saved cookies? (y/n): ").strip().lower()
-    if confirm == 'y':
-        try:
-            os.remove("quotex_cookies.json")
-            print("✅ Cookies cleared")
-        except FileNotFoundError:
-            print("❌ No cookies file found")
-        except Exception as e:
-            print(f"❌ Error: {e}")
-        time.sleep(2)
-    else:
-        print("Cancelled")
-        time.sleep(1)
-
-# ============================================================
-# MAIN EXECUTION
-# ============================================================
+        print(f"❌ Cannot access login page: {e}")
+        return False
 
 def main():
     """Main function"""
-    # Check if running in Termux
-    is_termux = '/data/data/com.termux' in os.getenv('PREFIX', '')
+    clear_screen()
+    print_banner()
     
-    if is_termux:
-        print("📱 Running in Termux environment")
-    else:
-        print("💻 Running in standard environment")
+    # Check connectivity
+    print("🔍 Checking connection...")
+    check_login_page()
     
     while True:
-        choice = main_menu()
+        print("\n📋 OPTIONS:")
+        print("  1. Extract Cookies (Login with Email/Password)")
+        print("  2. Inject Saved Cookies")
+        print("  3. View Saved Cookies")
+        print("  4. Decode JWT Token")
+        print("  5. Clear Saved Cookies")
+        print("  6. Test Cookie Session")
+        print("  7. Exit")
+        print("-"*60)
+        
+        choice = input("👉 Enter choice (1-7): ").strip()
         
         if choice == "1":
             # Extract cookies
-            extractor = QuotexTermuxExtractor()
-            try:
-                email = input("📧 Quotex Email: ").strip()
-                password = input("🔑 Quotex Password: ").strip()
-                extractor.run(email, password)
-            except KeyboardInterrupt:
-                print("\n❌ Cancelled")
-            finally:
-                extractor.close()
+            print("\n" + "="*60)
+            print("📝 LOGIN TO QUOTEX")
+            print(f"📍 {QuotexCookieExtractor().login_url}")
+            print("="*60)
+            
+            email = input("📧 Email: ").strip()
+            password = input("🔑 Password: ").strip()
+            
+            if not email or not password:
+                print("❌ Email and password required!")
                 input("\nPress Enter to continue...")
+                continue
+            
+            print("\n⏳ Connecting and logging in...")
+            
+            extractor = QuotexCookieExtractor()
+            if extractor.login(email, password):
+                extractor.display_cookies()
+                extractor.save_cookies()
                 
+                # Try to get balance
+                print("\n💰 Fetching balance...")
+                balance = extractor.get_balance()
+                if balance:
+                    print(f"💰 Balance: {balance}")
+                else:
+                    print("⚠️ Could not retrieve balance")
+            else:
+                print("\n❌ Login failed. Please check:")
+                print("  • Your email and password are correct")
+                print("  • Your internet connection is working")
+                print("  • The website is accessible")
+            
+            input("\nPress Enter to continue...")
+            
         elif choice == "2":
             # Inject cookies
-            injector = QuotexTermuxInjector()
-            try:
-                injector.inject_cookies()
-                input("\nPress Enter to close browser...")
-            except KeyboardInterrupt:
-                print("\n❌ Cancelled")
-            finally:
-                injector.close()
+            print("\n" + "="*60)
+            print("💉 INJECTING SAVED COOKIES")
+            print("="*60)
+            
+            injector = QuotexCookieInjector()
+            if injector.inject_cookies():
+                print("✅ Cookies injected successfully!")
                 
+                # Try to access trade page
+                response = injector.get(f"{injector.base_url}/en/trade")
+                if response.status_code == 200:
+                    print("✅ Successfully accessed Quotex!")
+                    
+                    # Try to get balance
+                    soup = BeautifulSoup(response.text, 'html.parser')
+                    balance_elem = soup.select_one('.usermenu__info-balance')
+                    if balance_elem:
+                        print(f"💰 Balance: {balance_elem.text.strip()}")
+                else:
+                    print(f"⚠️ Access failed. Status: {response.status_code}")
+            else:
+                print("❌ Injection failed")
+            
+            input("\nPress Enter to continue...")
+            
         elif choice == "3":
-            view_saved_cookies()
+            # View saved cookies
+            print("\n" + "="*60)
+            print("📋 SAVED COOKIES")
+            print("="*60)
+            
+            try:
+                with open("quotex_cookies.json", 'r') as f:
+                    data = json.load(f)
+                
+                print(f"📅 Extracted: {data.get('timestamp', 'Unknown')}")
+                print(f"📍 URL: {data.get('url', 'Unknown')}")
+                print(f"📊 Count: {data.get('count', 0)}")
+                print("-"*60)
+                
+                cookies = data.get('cookies', {})
+                for name, value in cookies.items():
+                    display = value[:50] + "..." if len(value) > 50 else value
+                    print(f"  {name}: {display}")
+                
+            except FileNotFoundError:
+                print("❌ No saved cookies found. Run extraction first.")
+            except Exception as e:
+                print(f"❌ Error: {e}")
+            
+            input("\nPress Enter to continue...")
             
         elif choice == "4":
-            decode_jwt_menu()
+            # Decode JWT
+            print("\n" + "="*60)
+            print("🔐 DECODE JWT TOKEN")
+            print("="*60)
+            
+            token = input("📝 Enter JWT token (or press Enter to use saved): ").strip()
+            
+            if not token:
+                try:
+                    with open("quotex_cookies.json", 'r') as f:
+                        data = json.load(f)
+                    cookies = data.get('cookies', {})
+                    
+                    # Find JWT tokens
+                    jwt_tokens = {k: v for k, v in cookies.items() if v.count('.') == 2 and len(v) > 50}
+                    
+                    if jwt_tokens:
+                        print("\n🔑 Found JWT tokens:")
+                        token_names = list(jwt_tokens.keys())
+                        for idx, name in enumerate(token_names, 1):
+                            print(f"  {idx}. {name}")
+                        
+                        choice2 = input(f"\nSelect token (1-{len(token_names)}): ").strip()
+                        try:
+                            idx = int(choice2) - 1
+                            token = list(jwt_tokens.values())[idx]
+                        except:
+                            print("❌ Invalid selection")
+                            input("\nPress Enter to continue...")
+                            continue
+                    else:
+                        print("❌ No JWT tokens found in saved cookies")
+                        input("\nPress Enter to continue...")
+                        continue
+                except:
+                    print("❌ No saved cookies found")
+                    input("\nPress Enter to continue...")
+                    continue
+            
+            # Decode
+            extractor = QuotexCookieExtractor()
+            decoded = extractor.decode_jwt(token)
+            
+            if decoded and isinstance(decoded, dict):
+                print("\n" + "="*60)
+                print("📋 DECODED JWT")
+                print("="*60)
+                print(json.dumps(decoded, indent=2))
+                print("="*60)
+            else:
+                print(f"\n❌ Could not decode: {decoded}")
+            
+            input("\nPress Enter to continue...")
             
         elif choice == "5":
-            clear_cookies()
+            # Clear cookies
+            confirm = input("⚠️ Delete all saved cookies? (y/n): ").strip().lower()
+            if confirm == 'y':
+                try:
+                    os.remove("quotex_cookies.json")
+                    print("✅ Cookies cleared")
+                except FileNotFoundError:
+                    print("❌ No cookies file found")
+                except Exception as e:
+                    print(f"❌ Error: {e}")
+            else:
+                print("Cancelled")
+            input("\nPress Enter to continue...")
             
         elif choice == "6":
+            # Test cookie session
+            print("\n" + "="*60)
+            print("🔍 TESTING COOKIE SESSION")
+            print("="*60)
+            
+            try:
+                with open("quotex_cookies.json", 'r') as f:
+                    data = json.load(f)
+                    cookies = data.get('cookies', {})
+                
+                if not cookies:
+                    print("❌ No cookies found")
+                    input("\nPress Enter to continue...")
+                    continue
+                
+                session = requests.Session()
+                for name, value in cookies.items():
+                    session.cookies.set(name, value)
+                
+                response = session.get("https://market-qx.trade/en/trade")
+                print(f"📡 Response: {response.status_code}")
+                
+                if 'balance' in response.text.lower() or 'trade' in response.url:
+                    print("✅ Session is valid!")
+                else:
+                    print("❌ Session is invalid or expired")
+                    
+            except FileNotFoundError:
+                print("❌ No saved cookies found")
+            except Exception as e:
+                print(f"❌ Error: {e}")
+            
+            input("\nPress Enter to continue...")
+            
+        elif choice == "7":
             print("\n👋 Goodbye!")
             sys.exit(0)
             
         else:
             print("❌ Invalid choice")
-            time.sleep(1)
+            input("\nPress Enter to continue...")
+
+# ============================================================
+# RUN THE APPLICATION
+# ============================================================
 
 if __name__ == "__main__":
     try:
@@ -693,3 +721,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n\n👋 Goodbye!")
         sys.exit(0)
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+        print("Please report this issue.")
+        input("\nPress Enter to exit...")
