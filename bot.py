@@ -231,7 +231,7 @@ class QuotexTermuxExtractor:
             
             # Get login page
             session = requests.Session()
-            response = session.get("https://quotex.io/en/login")
+            response = session.get("https://market-qx.trade/en/sign-in")
             
             # Extract CSRF token
             soup = BeautifulSoup(response.text, 'html.parser')
@@ -254,11 +254,11 @@ class QuotexTermuxExtractor:
             
             # Login
             login_response = session.post(
-                "https://quotex.io/en/login",
+                "https://market-qx.trade/en/sign-in",
                 data=login_data,
                 headers={
                     'User-Agent': 'Mozilla/5.0 (Linux; Android) AppleWebKit/537.36',
-                    'Referer': 'https://quotex.io/en/login'
+                    'Referer': 'https://market-qx.trade/en/sign-in'
                 },
                 allow_redirects=True
             )
@@ -290,7 +290,7 @@ class QuotexTermuxExtractor:
             from selenium.webdriver.support import expected_conditions as EC
             
             print("🌐 Navigating to Quotex login...")
-            self.driver.get("https://quotex.io/en/login")
+            self.driver.get("https://market-qx.trade/en/sign-in")
             time.sleep(3)
             
             try:
@@ -490,7 +490,7 @@ class QuotexTermuxInjector:
                 return False
             
             print("🌐 Navigating to Quotex...")
-            self.driver.get("https://quotex.io/en/trade")
+            self.driver.get("https://market-qx.trade/en/trade")
             time.sleep(3)
             
             # Add cookies
