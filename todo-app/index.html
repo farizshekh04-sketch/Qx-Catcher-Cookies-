@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>To-Do List Application</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="todo-wrapper">
+            <!-- Header -->
+            <div class="header">
+                <h1>📝 My To-Do List</h1>
+                <p class="subtitle">Stay organized and boost productivity</p>
+            </div>
+
+            <!-- Input Section -->
+            <div class="input-section">
+                <div class="input-group">
+                    <input 
+                        type="text" 
+                        id="todoInput" 
+                        class="todo-input" 
+                        placeholder="Add a new task..."
+                        autocomplete="off"
+                    >
+                    <button id="addBtn" class="add-btn">
+                        <span class="btn-icon">+</span>
+                        <span class="btn-text">Add</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Filter Section -->
+            <div class="filter-section">
+                <button class="filter-btn active" data-filter="all">All</button>
+                <button class="filter-btn" data-filter="active">Active</button>
+                <button class="filter-btn" data-filter="completed">Completed</button>
+            </div>
+
+            <!-- Stats Section -->
+            <div class="stats-section">
+                <div class="stat">
+                    <span class="stat-label">Total:</span>
+                    <span class="stat-value" id="totalCount">0</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Active:</span>
+                    <span class="stat-value" id="activeCount">0</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Completed:</span>
+                    <span class="stat-value" id="completedCount">0</span>
+                </div>
+            </div>
+
+            <!-- Todo List -->
+            <div class="todo-list" id="todoList">
+                <!-- Todos will be added here dynamically -->
+                <div class="empty-state">
+                    <p class="empty-icon">🎯</p>
+                    <p class="empty-text">No tasks yet. Add one to get started!</p>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="action-buttons">
+                <button id="clearCompletedBtn" class="action-btn clear-completed-btn">
+                    Clear Completed
+                </button>
+                <button id="clearAllBtn" class="action-btn clear-all-btn">
+                    Clear All
+                </button>
+            </div>
+
+            <!-- Footer -->
+            <div class="footer">
+                <p>💾 Your tasks are automatically saved to local storage</p>
+                <p class="version">To-Do App v1.0</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
